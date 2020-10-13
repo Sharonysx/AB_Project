@@ -9,9 +9,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pickle as pk
 from scipy import stats
+from scipy.stats.mstats import winsorize
 import gc
 import os
 os.chdir(r'C:\Users\38030\OneDrive\CORNELL\2020F\AB')
+
 #%%
 sp500_ab=pd.read_csv('sp500_ab.csv')
 sp500_ab['yearmonth']=sp500_ab['date']//100
@@ -23,7 +25,7 @@ price_cons=pd.read_csv('sp500_cons_part_prc.csv')
 error=['0051B','1974B','3CCIKO','4741B','4764B','5235B','6525B','6712B','9297B','1717B','2091B','5050B']
 price_cons=price_cons[~price_cons.tic.isin(error)]
 
-#%%
+#%% cap return calculation
 price_cons['yearmonth']=price_cons['datadate']//100
 price_cons['cap']=price_cons['prccm']*price_cons['cshom']
 price_cons.sort_values(by=['gvkey','datadate'],inplace=True)
@@ -32,14 +34,15 @@ price_cons['total_cap_t1'] = price_cons.groupby(['yearmonth'])['cap_t1'].transfo
 price_cons['w']=price_cons['cap_t1']/price_cons['total_cap_t1']
 price_cons['cap_ret']= price_cons['w']*(price_cons['trt1m']/100)
 cap_ret=price_cons.groupby(['yearmonth'])['cap_ret'].sum().reset_index()
-#%%
+
 compare = pd.merge(cap_ret,sp500_ab)
 compare.columns=['yearmonth','cap_ret','date','spx_ab']
 compare=compare[1:]
 compare['diff']=compare['cap_ret']-compare['spx_ab']
 plt.plot(compare['diff'])
 plt.savefig('spx_ret_diff.png',bbox_inches='tight') 
-#%%
+
+#%% technical features(monthly)
 price_raw=price_raw[~price_raw.tic.isin(error)]
 test=price_raw.groupby(by=['gvkey','iid']).size().reset_index()
 test=test.sort_values(by=['gvkey',0],ascending=False).drop_duplicates(subset=['gvkey'],keep='first')
@@ -60,7 +63,8 @@ price_raw=pd.merge(price_raw,dividend,how='left')
 price_raw['dvpspm'].fillna(0,inplace=True)
 price_raw['dvpsxm'].fillna(0,inplace=True)
 price_raw.to_csv('sp500_cons_prc.csv',index=False)
-#%%
+
+#%% valuation and quality features(quarterly)
 data=pd.read_csv('financial_sp500.csv')
 data['dvpq_3y']=data.groupby(['gvkey'])['dvpq'].transform(lambda x: x.rolling(12).mean())
 data['dvpq_y']=data.groupby(['gvkey'])['dvpq'].transform(lambda x: x.rolling(4).mean())
@@ -148,23 +152,23 @@ features = price_financial[['iid','gvkey','tic','datadate','industry_id','trt1m'
 sp500_cons_daily=pd.read_csv('sp500_cons_daily.csv')
 
 sp500_cons_daily['adj_close']=sp500_cons_daily['prccd']*(sp500_cons_daily['trfd']/100+1)
-sp500_cons_daily['adj_ret']=sp500_cons_daily.groupby(['gvkey','iid'])['adj_close'].transform(lambda x: x.diff(1)/x.shift(1))
-sp500_cons_daily['vol']=sp500_cons_daily.groupby(['gvkey','iid'])['adj_ret'].transform(lambda x: x.rolling(252).std()*np.sqrt(252))
+sp500_cons_daily['adj_ret']=sp500_cons_daily.groupby(['gvkey','iid','tic'])['adj_close'].transform(lambda x: x.diff(1)/x.shift(1))
+sp500_cons_daily['vol']=sp500_cons_daily.groupby(['gvkey','iid','tic'])['adj_ret'].transform(lambda x: x.rolling(252).std()*np.sqrt(252))
 sp500_cons_daily['yearmonth'] = sp500_cons_daily['datadate']//100
-test=sp500_cons_daily.groupby(by=['yearmonth','gvkey','iid'])['datadate'].max().reset_index()
+test=sp500_cons_daily.groupby(by=['yearmonth','gvkey','iid','tic'])['datadate'].max().reset_index()
 sp500_cons_daily1=pd.merge(sp500_cons_daily,test)
 
 
 features['yearmonth']=features['datadate']//100
-features=pd.merge(features,sp500_cons_daily1[['gvkey','iid','yearmonth','vol']],how='left')
+features=pd.merge(features,sp500_cons_daily1[['gvkey','iid','tic','yearmonth','vol']],how='left')
 features=features[features.datadate>20100000]
 features=features[features.datadate<20200000]
 features.sort_values(by=['gvkey','iid','datadate'],inplace=True)
 features.drop(columns=['yearmonth'],inplace=True)
 features.to_csv('features.csv',index=False)
 
-#%%
-cons_features = pd.merge(price_cons[['gvkey','datadate','conm']],price_financial)
+#%% Select SPX constituents stocks
+cons_features = pd.merge(price_cons[['gvkey','datadate','conm','tic']],features)
 cons_features = cons_features[['iid','gvkey','tic','datadate','industry_id','trt1m','adj_close',
                      'abnormal_volume','MA3','MA6','MA12','EMA3','EMA6','EMA12','NI_growth',
                      'Size','PriceCap','ROE','ROA','ROI','NetPM','epspi12','earnings', 'earningsVol','Asset Turnover',
@@ -173,26 +177,40 @@ cons_features = cons_features[['iid','gvkey','tic','datadate','industry_id','trt
 
 cons_features.to_csv('sp500_cons_part_features.csv',index=False)
 
+cons_features = pd.read_csv('sp500_cons_part_features.csv')
 
-X=cons_features.iloc[:,8:]
-cons_features['year']=cons_features['datadate']//10000
-X['year']=cons_features['year']
-X['industry_id']=cons_features['industry_id']
+X=cons_features.copy()
+features = list(cons_features.columns)[7:]
 def z_score(x):
     return((x-x.mean())/x.std())
-X=X.groupby(by=['year','industry_id']).apply(z_score)
-spx_norm=cons_features.copy()
-spx_norm.iloc[:,8:]=X
-spx_norm['forward_ret']=spx_norm.groupby(['gvkey'])['trt1m'].transform(lambda x: x.shift(-1))
-spx_norm.to_csv('spx_cons_norm.csv',index=False)
-
+X[features]=X.groupby(by=['datadate','industry_id'])[features].transform(z_score)
+def winsor(x):
+    return(winsorize(x,limits=0.05))
+X[features]=X.groupby(['datadate','industry_id'])[features].transform(winsor)
+spx_norm=X.copy()
 spx=pd.read_csv('sp500_monthly.csv')
-spx_norm=pd.read_csv('spx_cons_norm.csv')
+spx_norm.sort_values(by=['datadate','gvkey','tic'],inplace=True)
 spx_norm['yearmonth'] = spx_norm['datadate']//100
 spx_norm=pd.merge(spx_norm,spx)
-spx_norm['forward_return'] = spx_norm.groupby(['gvkey'])['trt1m'].transform(lambda x: x.shift(-1))
-spx_norm['excess_ret'] = spx_norm['trt1m']-spx_norm['sp500_ret']
-spx_norm['forward_excess_ret'] = spx_norm.groupby(by=['gvkey'])['trt1m'].transform(lambda x: x.shift(-1))
+spx_norm['forward_return'] = spx_norm.groupby(['gvkey','tic'])['trt1m'].transform(lambda x: x.shift(-1))/100
+spx_norm['excess_ret'] = spx_norm['trt1m']/100-spx_norm['sp500_ret']
+spx_norm['forward_excess_ret'] = spx_norm.groupby(by=['gvkey','tic'])['excess_ret'].transform(lambda x: x.shift(-1))
+
+
+### Labels
+def binary_class(df):
+    return(pd.qcut(df,2,labels=False))   
+
+
+def multi_class(df):
+    return(pd.qcut(df,10,labels=False))
+    
+    
+
+spx_norm['binary_class'] = spx_norm.groupby(['datadate'])['forward_excess_ret'].transform(binary_class)
+spx_norm.dropna(subset=['forward_excess_ret'],inplace=True)
+spx_norm['multi_class'] = spx_norm.groupby(['datadate'])['forward_excess_ret'].transform(multi_class)
+
 spx_norm.to_csv('spx_cons_norm.csv',index=False)
 
 #%%
