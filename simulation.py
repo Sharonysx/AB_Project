@@ -22,7 +22,7 @@ X.columns = ['x1','x2','x3','x4','x5','residual']
 
 def transform1(x):
     if x>1.2 or x<-0.5:
-        return(1)
+        return(x)
     else:
         return(0)
 
