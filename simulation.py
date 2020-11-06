@@ -41,5 +41,6 @@ X['x12_transform'] = X.x1*X.x2
 X['x3_transform'] = np.sin(X['x3']/2*np.pi) #sinx function
 X['x4_transform'] = X.x4.apply(lambda x: int(x>1.1))
 
-X['y'] = X['x1_transform']*0.25 + X['x2_transform'] + X['x12_transform']*0.2 + X['x3_transform']*0.1 \
-         + X['x4_transform']*X['x3_transform']*0.7 + X['residual']*0.25
+X['y'] = X['x1_transform']*2 + X['x2_transform'] + X['x12_transform']*0.2 + X['x3_transform']*0.1 \
+         + X['x4_transform']*X['x3_transform']*0.7 + X['x4'] + X['residual']*0.25
+X.to_csv('simulation_data.csv',index=False)
